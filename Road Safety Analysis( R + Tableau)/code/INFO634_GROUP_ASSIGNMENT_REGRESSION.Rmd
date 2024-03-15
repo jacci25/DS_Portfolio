@@ -1,10 +1,5 @@
 ---
 title: "INFO634 - Group Assignment - Group 1"
-author: "Christian Llave (85662382)"
-date: "`r Sys.Date()`"
-output:
-  word_document: default
-  html_document: default
 ---
 
 # Preparation.
