@@ -1,0 +1,545 @@
+---
+title: "INFO634 - Group Assignment - Group 1"
+author: "Christian Llave (85662382)"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# Preparation.
+Load the Dataset and relevant libraries. Tidyverse is used for easy transition and transformation of data. randomForest is used to create the models. Caret is used for creating the confusion matrix on the test set. The library pdp creates Partial Dependency data and Ggplot2 allows us to plot them.
+```{r setup}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(caret)
+library(randomForest)
+library(ggplot2)
+library(pdp)
+df <- read.csv("Crash_Analysis_System_(CAS)_data.csv")
+```
+
+Filter the dataset by 2020, as it is comparable to the range of the police data, and remove metadata columns as they will not be useful in the model creation.
+```{r}
+filtered_df <- df %>%
+  select(-c(areaUnitID, meshblockId, tlaId)) %>%
+  filter(crashYear >= 2020)
+```
+
+From the filtered dataframe, we remove the columns that are either redundant, or irrelevant to the model. We also cleaned the dataset for the speedLimit, NumberOfLanes, streetLight predictors to remove null values relevant to the data dictionary. We then also aggregate the number of vehicle damage, object damage, and property damage as we want to predict those.
+
+```{r}
+lean_df <- filtered_df %>%
+  select(-c('advisorySpeed', 'slipOrFlood', 'temporarySpeedLimit', 'weatherB',
+            'crashDirectionDescription', 'directionRoleDescription',
+            'parkedVehicle', 'vehicle', 'crashFinancialYear', 'crashYear',
+            'crashLocation2', 'tlaName', 'crashRoadSideRoad', 'intersection', 'X', 'Y', 'OBJECTID')) %>%
+  mutate(crashSeverity = factor(crashSeverity),
+    speedLimit = case_when(
+           is.na(speedLimit) & urban == "urban" ~ 79,
+           is.na(speedLimit) & urban != 'urban' ~ 100,
+           TRUE ~ speedLimit
+           ),
+         NumberOfLanes = case_when(
+           is.na(NumberOfLanes) & roadLane == 'Off road' ~ 0,
+           is.na(NumberOfLanes) & str_detect(crashLocation1, 'OFF') ~ 0,
+           TRUE ~ NumberOfLanes
+         ),
+         streetLight = case_when(
+           is.na(streetLight) ~ 'Unknown',
+           TRUE ~ streetLight
+         ),
+         bridge = case_when(
+           is.na(bridge) ~ 0,
+           TRUE ~ bridge
+         ),
+         cliffBank = case_when(
+           is.na(cliffBank) ~ 0,
+           TRUE ~ cliffBank
+         ),
+         ditch = case_when(
+           is.na(ditch) ~ 0,
+           TRUE ~ ditch
+         ),
+         debris = case_when(
+           is.na(debris) ~ 0,
+           TRUE ~ debris
+         ),
+         guardRail = case_when(
+           is.na(guardRail) ~ 0,
+           TRUE ~ guardRail
+         ),
+         houseOrBuilding = case_when(
+           is.na(houseOrBuilding) ~ 0,
+           TRUE ~ houseOrBuilding
+         ),
+         kerb = case_when(
+           is.na(kerb) ~ 0,
+           TRUE ~ kerb
+         ),
+         trafficControl = case_when(
+           is.na(trafficControl) ~ 'Not Applicable',
+           TRUE ~ trafficControl
+         ),
+         fence = case_when(
+           is.na(fence) ~ 0,
+           TRUE ~ fence
+         ),
+         otherObject = case_when(
+           is.na(otherObject) ~ 0,
+           TRUE ~ otherObject
+         ),
+         overBank = case_when(
+           is.na(overBank) ~ 0,
+           TRUE ~ overBank
+         ),
+         pedestrian = case_when(
+           is.na(pedestrian) ~ 0,
+           TRUE ~ pedestrian
+         ),
+         phoneBoxEtc = case_when(
+           is.na(phoneBoxEtc) ~ 0,
+           TRUE ~ phoneBoxEtc
+         ),
+         strayAnimal = case_when(
+           is.na(strayAnimal) ~ 0,
+           TRUE ~ strayAnimal
+         ),
+         trafficSign = case_when(
+           is.na(trafficSign) ~ 0,
+           TRUE ~ trafficSign
+         ),
+         trafficIsland = case_when(
+           is.na(trafficIsland) ~ 0,
+           TRUE ~ trafficIsland
+         ),
+         objectThrownOrDropped = case_when(
+           is.na(objectThrownOrDropped) ~ 0,
+           TRUE ~ objectThrownOrDropped
+         ),
+         train = case_when(
+           is.na(train) ~ 0,
+           TRUE ~ train
+         ),
+         tree = case_when(
+           is.na(tree) ~ 0,
+           TRUE ~ tree
+         ),
+         waterRiver = case_when(
+           is.na(waterRiver) ~ 0,
+           TRUE ~ waterRiver
+         ),
+         postOrPole = case_when(
+           is.na(postOrPole) ~ 0,
+           TRUE ~ postOrPole
+         ),
+         roadworks = case_when(
+           is.na(roadworks) ~ 0,
+           TRUE ~ roadworks
+         ),
+         vehicle_damage = bicycle + bus+ carStationWagon + moped + motorcycle + otherVehicleType +
+           schoolBus + suv + taxi + train+ truck+ unknownVehicleType+ vanOrUtility,
+         object_damage = objectThrownOrDropped + otherObject,
+         property_damage = fence + houseOrBuilding + phoneBoxEtc + postOrPole + bridge+ guardRail + trafficSign
+         )
+```
+
+Checking the number of null values, because randomForest does not accept null values in the predictors.
+```{r}
+colSums(is.na(lean_df))
+```
+
+Group together variables so we can create different dataframes for each response variable we're predicting.
+```{r}
+vehicle_damage_variables <- c('bicycle', 'bus', 'carStationWagon', 'moped', 'motorcycle', 'otherVehicleType','schoolBus', 'suv', 'taxi', 'train', 'truck', 'unknownVehicleType', 'vanOrUtility')
+
+object_damage_variables <- c('objectThrownOrDropped', 'otherObject')
+
+crash_aftermath_variables <- c('pedestrian', 'strayAnimal')
+
+property_damage_variables <- c('fence', 'houseOrBuilding', 'phoneBoxEtc', 'postOrPole', 'bridge', 'guardRail', 'trafficSign')
+
+injury_count_variables <- c('fatalCount', 'minorInjuryCount', 'seriousInjuryCount')
+```
+
+# Model Creation: Classification of Crash Severity
+
+As this is a classification task, we first calculate the proportions of each class to detect class imbalance. Based on these summaries, we can observe major class imbalance to less severe crashes, which throws off our model predictions for the minority class, in this case the serious and fatal cases. 
+
+```{r}
+class_proportions <- table(lean_df$crashSeverity) / nrow(lean_df)
+class_proportions
+```
+
+Across the classification models, We will use two methods to remedy this in training the model: class weights and stratified random sampling. We're using the reciprocal class weights as a start, and can be tuned later on. Doing this at the beginning accounts for the original pattern of the class imbalance.
+
+## Method 1: Random Forest predicting 4 classes with class weight and stratified sampling.
+
+In this first model, we are accounting for the class count of all four classes from the original dataset.
+```{r}
+class_counts <- table(lean_df$crashSeverity)
+class_counts
+
+class_weights <- 1/class_counts
+class_weights
+```
+
+We then split the dataset into training and testing using stratified random sampling to preserve the mimic the proportions of classes in the original dataset.
+```{r}
+sampling_fraction <- 0.8
+set.seed(12)
+train_indices <- createDataPartition(lean_df$crashSeverity, p = sampling_fraction, list = FALSE)
+
+train <- lean_df[train_indices,]
+test <- lean_df[-train_indices,]
+
+print("Original Proportions")
+table(lean_df$crashSeverity) / nrow(lean_df)
+
+print("Training Proportions")
+table(train$crashSeverity) / nrow(train)
+
+print("Training Counts")
+table(train$crashSeverity)
+```
+
+We remove other response variables here that are used for other models. For severity, we just want the crashSeverity variable, which is categorical. 
+```{r warning=FALSE}
+severity_train <- train %>%
+    select(-vehicle_damage_variables, -object_damage_variables, -crash_aftermath_variables, -property_damage_variables, -injury_count_variables, -crashLocation1, -urban, -vehicle_damage, -object_damage, -property_damage)
+```
+
+We then run the random forest classifier, predicting crash severity using the applicable variables, and applying the class weight to prevent the minority class from being disadvantaged. The output provides the error metrics of the training set, and the graph of important variables for this model.
+
+```{r}
+set.seed(12)
+
+rf.severity1 <- randomForest(crashSeverity ~ ., data = severity_train, mtry = (length(severity_train)-1)/3, importance = TRUE, classwt = class_weights)
+
+rf.severity1
+varImpPlot(rf.severity1)
+```
+
+Get the error metrics from applying the model onto the test set.
+```{r}
+pred_severity_train <- predict(rf.severity1, newdata = test)
+confusionMatrix(pred_severity_train, test$crashSeverity, mode = 'everything', positive = "Serious")
+```
+
+We would like to get the model with the least number of false negatives (not classifying serious and fatal crashes as the correct category) because those two have higher social cost than the other categories.
+
+## Method 2: Random Forest predicting 2 classes with class weights, and de-duplication from majority class
+Given the classes we need to consider, balancing four classes may be an attempt at over-optimization, so we thought of grouping together the critical classes as "Serious" and the less severe ones as "Non-Serious" to indicate which kinds of crashes would likely need more attention.
+
+```{r}
+majority_classes <- c('Minor Crash', 'Non-Injury Crash')
+lean_df <- lean_df %>%
+  mutate(crashSeverity = case_when(crashSeverity %in% majority_classes ~ 'Non-Serious',
+                                     TRUE ~ 'Serious')) %>%
+  mutate(crashSeverity = as.factor(crashSeverity))
+```
+
+Similarly, we calculate the proportions of each class, and use the reciprocals as class weights.
+```{r}
+class_proportions <- table(lean_df$crashSeverity) / nrow(lean_df)
+class_proportions
+
+class_counts <- table(lean_df$crashSeverity)
+class_counts
+
+class_weights <- 1/class_counts
+class_weights
+```
+
+We then do stratified random sampling, and this time, de-duplicating identical rows from the majority class. This is to ensure we're only taking fairly representative observations within the majority class to not overtake the minority.
+
+```{r}
+sampling_fraction <- 0.8
+set.seed(12)
+train_indices <- createDataPartition(lean_df$crashSeverity, p = sampling_fraction, list = FALSE)
+
+train <- lean_df[train_indices,]
+test <- lean_df[-train_indices,]
+
+print("Original Proportions")
+table(lean_df$crashSeverity) / nrow(lean_df)
+
+print("Training Proportions")
+table(train$crashSeverity) / nrow(train)
+table(train$crashSeverity)
+
+minority_class <- c('Fatal Crash', 'Serious Crash')
+train <- train %>%
+  filter(!crashSeverity == 'Serious') %>%
+  distinct()%>%
+  bind_rows(train %>%
+    filter(crashSeverity == 'Serious'))
+
+print("De-duplicated proportions")
+table(train$crashSeverity) / nrow(train)
+table(train$crashSeverity)
+```
+
+We remove other response variables here that are used for other models. For severity, we just want the crashSeverity variable, which is categorical. 
+```{r warning=FALSE}
+severity_train <- train %>%
+    select(-vehicle_damage_variables, -object_damage_variables, -crash_aftermath_variables, -property_damage_variables, -injury_count_variables, -crashLocation1, -urban, -vehicle_damage, -object_damage, -property_damage)
+```
+
+We then run the random forest classifier. 
+
+```{r}
+set.seed(12)
+
+rf.severity2 <- randomForest(crashSeverity ~ ., data = severity_train, mtry = (length(severity_train)-1)/3, importance = TRUE, classwt = class_weights)
+
+rf.severity2
+varImpPlot(rf.severity2)
+```
+
+Checking error metrics and accuracy.
+```{r}
+pred_severity_train <- predict(rf.severity2, newdata = test)
+confusionMatrix(pred_severity_train, test$crashSeverity, mode = 'everything', positive = "Serious")
+```
+
+
+## Method 3: Random forest predicting 2 classes with class weight, de-duplicated majority, and downsampled majority.
+Considering fatal and serious crashes can cost lives, we need to adjust our prediction to better predict factors that affect the occurrence of those severity types. This time we're downsampling the majority class to be at most 1.5x the size of the minority class, where 1.5 is a starting point for tuning.
+
+```{r}
+sampling_fraction <- 0.8
+set.seed(12)
+train_indices <- createDataPartition(lean_df$crashSeverity, p = sampling_fraction, list = FALSE)
+
+train <- lean_df[train_indices,]
+test <- lean_df[-train_indices,]
+
+print("Original Proportions")
+table(lean_df$crashSeverity) / nrow(lean_df)
+
+print("Training Proportions")
+table(train$crashSeverity) / nrow(train)
+table(train$crashSeverity)
+
+minority_size <- sum(train$crashSeverity == 'Serious')
+train <- train %>%
+  filter(!crashSeverity == 'Serious') %>%
+  distinct()%>%
+  bind_rows(train %>%
+    filter(crashSeverity == 'Serious'))
+
+print("De-duplicated proportions")
+table(train$crashSeverity) / nrow(train)
+table(train$crashSeverity)
+
+train <- train %>%
+  filter(!crashSeverity == 'Serious') %>%
+  sample_n(minority_size*1.5)%>%
+  bind_rows(train %>%
+    filter(crashSeverity == 'Serious'))
+
+print("Downsampled proportions")
+table(train$crashSeverity) / nrow(train)
+table(train$crashSeverity)
+```
+
+We remove other response variables here that are used for other models. For severity, we just want the crashSeverity variable, which is categorical. 
+```{r warning=FALSE}
+severity_train <- train %>%
+    select(-vehicle_damage_variables, -object_damage_variables, -crash_aftermath_variables, -property_damage_variables, -injury_count_variables, -crashLocation1, -urban, -vehicle_damage, -object_damage, -property_damage)
+```
+
+Plugging in the predictors to the random forest classifier.
+```{r}
+set.seed(12)
+
+rf.severity3 <- randomForest(crashSeverity ~ ., data = severity_train, mtry = (length(severity_train)-1)/3, importance = TRUE, classwt = class_weights)
+
+rf.severity3
+varImpPlot(rf.severity3)
+```
+
+View accuracy and error metrics.
+```{r}
+pred_severity_train <- predict(rf.severity3, newdata = test)
+confusionMatrix(pred_severity_train, test$crashSeverity, mode = 'everything', positive = "Serious")
+```
+
+Try updating class weights, to see if there are improvements to performance. The log scale handles large values well, and using the reciprocal allows us to give more priority to Serious crashes.
+```{r}
+class_weights <- 1/log(class_counts)
+class_weights
+```
+
+Plugging this into the model.
+```{r}
+set.seed(12)
+
+rf.severity4 <- randomForest(crashSeverity ~ ., data = severity_train, mtry = (length(severity_train)-1)/3, importance = TRUE, classwt = class_weights)
+
+rf.severity4
+varImpPlot(rf.severity4)
+```
+
+Getting accuracy and error metrics.
+```{r}
+pred_severity_train <- predict(rf.severity4, newdata = test)
+confusionMatrix(pred_severity_train, test$crashSeverity, mode = 'everything', positive = "Serious")
+```
+
+What is the model like without class weights?
+```{r}
+set.seed(12)
+
+rf.severity5 <- randomForest(crashSeverity ~ ., data = severity_train, mtry = (length(severity_train)-1)/3, importance = TRUE)
+
+rf.severity5
+varImpPlot(rf.severity5)
+```
+
+Testing this model onto the test set.
+```{r}
+pred_severity_train <- predict(rf.severity5, newdata = test)
+confusionMatrix(pred_severity_train, test$crashSeverity, mode = 'everything', positive = "Serious")
+```
+
+## Method 4: Random forest predicting 2 classes with class weight, de-duplicated majority, and downsampled majority (3x minority)
+
+We're now trying a model that allows the majority class to be 3x larger than the minority in our downsampling process.
+
+```{r}
+sampling_fraction <- 0.8
+set.seed(1)
+train_indices <- createDataPartition(lean_df$crashSeverity, p = sampling_fraction, list = FALSE)
+
+train <- lean_df[train_indices,]
+test <- lean_df[-train_indices,]
+
+print("Original Proportions")
+table(lean_df$crashSeverity) / nrow(lean_df)
+
+print("Training Proportions")
+table(train$crashSeverity) / nrow(train)
+table(train$crashSeverity)
+
+minority_size <- sum(train$crashSeverity == 'Serious')
+train <- train %>%
+  filter(!crashSeverity == 'Serious') %>%
+  distinct()%>%
+  bind_rows(train %>%
+    filter(crashSeverity == 'Serious'))
+
+print("De-duplicated proportions")
+table(train$crashSeverity) / nrow(train)
+table(train$crashSeverity)
+
+train <- train %>%
+  filter(!crashSeverity == 'Serious') %>%
+  sample_n(minority_size*3)%>%
+  bind_rows(train %>%
+    filter(crashSeverity == 'Serious'))
+
+print("Downsampled proportions")
+table(train$crashSeverity) / nrow(train)
+table(train$crashSeverity)
+```
+
+We remove other response variables here that are used for other models. For severity, we just want the crashSeverity variable, which is categorical. 
+```{r warning=FALSE}
+severity_train <- train %>%
+    select(-vehicle_damage_variables, -object_damage_variables, -crash_aftermath_variables, -property_damage_variables, -injury_count_variables, -crashLocation1, -urban, -vehicle_damage, -object_damage, -property_damage)
+```
+
+Create the model.
+```{r}
+set.seed(12)
+
+class_weights <- 1/class_counts
+class_weights
+
+rf.severity6 <- randomForest(crashSeverity ~ ., data = severity_train, mtry = (length(severity_train)-1)/3, importance = TRUE, classwt = class_weights)
+
+rf.severity6
+varImpPlot(rf.severity6)
+```
+
+Check error metrics on test set.
+```{r}
+pred_severity_train <- predict(rf.severity6, newdata = test)
+confusionMatrix(pred_severity_train, test$crashSeverity, mode = 'everything', positive = "Serious")
+```
+
+Try again with a class balance using the log scale. 
+```{r}
+set.seed(12)
+
+class_weights <- 1/log(class_counts)
+class_weights
+
+rf.severity7 <- randomForest(crashSeverity ~ ., data = severity_train, mtry = (length(severity_train)-1)/3, importance = TRUE, classwt = class_weights)
+
+rf.severity7
+varImpPlot(rf.severity7)
+```
+
+Test the model with log-scale weights on the test set.
+```{r}
+pred_severity_train <- predict(rf.severity7, newdata = test)
+confusionMatrix(pred_severity_train, test$crashSeverity, mode = 'everything', positive = "Serious")
+```
+
+This final model seems sensible enough to balance sensitivity and precision, so we take the most important variables from this model. Considering the use case of understanding what factors are most important to predict serious crashes, we'll take the variables that would have the most impact on accuracy (mean decrease accuracy).
+
+# Model Visualization
+
+For interpretability, we can plot the Partial Dependency Plots of each important variable, which holds all other variables constant and tries out different value of the variable to see its effect on the response (probability of being a severe crash). This method oversimplifies the random forest model, as the interactions are lost in the PDP plots. This is why these plots in the context of a random forest is only to give stakeholders an idea of how each variable affects the prediction.
+
+We first create the PDP dataframes, which try out different values of each variable in isolation, and plot the probability given our model. 
+```{r}
+pdp_ditch <- partial(rf.severity4, pred.var = 'ditch', data = test, type = 'classification', which.class = 2L, prob = TRUE) %>% rename(x = ditch)
+pdp_roadwork <- partial(rf.severity4, pred.var = 'roadworks', data = test, type = 'classification', which.class = 2L, prob = TRUE) %>% rename(x = roadworks)
+pdp_waterRiver <- partial(rf.severity4, pred.var = 'waterRiver', data = test, type = 'classification',  which.class = 2L, prob = TRUE) %>% rename(x = waterRiver)
+pdp_cliffBank <- partial(rf.severity4, pred.var = 'cliffBank', data = test, type = 'classification',  which.class = 2L, prob = TRUE) %>% rename(x = cliffBank)
+pdp_overBank <- partial(rf.severity4, pred.var = 'overBank', data = test, type = 'classification',  which.class = 2L, prob = TRUE) %>% rename(x = overBank)
+pdp_tree <- partial(rf.severity4, pred.var = 'tree', data = test, type = 'classification',  which.class = 2L, prob = TRUE) %>% rename(x = tree)
+pdp_trafficIsland <- partial(rf.severity4, pred.var = 'trafficIsland', data = test, type = 'classification',  which.class = 2L, prob = TRUE) %>% rename(x = trafficIsland)
+pdp_NumberOfLanes <- partial(rf.severity4, pred.var = 'NumberOfLanes', data = test, type = 'classification',  which.class = 2L, prob = TRUE) %>% rename(x = NumberOfLanes)
+pdp_speedLimit <- partial(rf.severity4, pred.var = 'speedLimit', data = test, type = 'classification',  which.class = 2L, prob = TRUE) %>% rename(x = speedLimit)
+```
+
+These are then combined into one dataframe for plotting.
+```{r}
+pdp_data <- bind_rows(
+  data.frame(Variable = "ditch", PDP = pdp_ditch),
+  data.frame(Variable = "roadworks", PDP = pdp_roadwork),
+  data.frame(Variable = "waterRiver", PDP = pdp_waterRiver),
+  data.frame(Variable = "cliffBank", PDP = pdp_cliffBank),
+  data.frame(Variable = "overBank", PDP = pdp_overBank),
+  data.frame(Variable = "tree", PDP = pdp_tree),
+  data.frame(Variable = "trafficIsland", PDP = pdp_trafficIsland),
+  data.frame(Variable = "NumberOfLanes", PDP = pdp_NumberOfLanes),
+  data.frame(Variable = "speedLimit", PDP = pdp_speedLimit)
+)
+```
+
+We then plot the combined dataframe, split by the variable to see their respective effects on the probability of serious crashes.
+```{r}
+pdp_plot <- ggplot(pdp_data, aes(x = PDP.x, y = PDP.yhat)) +
+  geom_line() +
+  facet_wrap(vars(Variable), scales = 'free') +
+  labs(
+    title = "Partial Dependence of Important Variables",
+    x = "Input Values",
+    y = "Probability of being Serious"
+  ) +
+  theme_minimal()
+
+pdp_plot
+```
+
+
+
+
+
+
+
+
