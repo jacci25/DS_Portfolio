@@ -1,0 +1,677 @@
+---
+title: "INFO634 - Group Assignment - Group 1"
+author: "Christian Llave (85662382)"
+date: "`r Sys.Date()`"
+output:
+  word_document: default
+  html_document: default
+---
+
+# Preparation.
+
+Load the Dataset and relevant libraries. Tidyverse is used for easy transition and transformation of data. randomForest is used to create the models. Caret is used for creating the confusion matrix on the test set. Pdp allows us to create partial dependency data and ggplot2 plots them.
+
+```{r setup}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(randomForest)
+library(ggplot2)
+library(pdp)
+df <- read.csv("Crash_Analysis_System_(CAS)_data.csv")
+```
+
+Filter the dataset by 2020, as it is comparable to the range of the police data, and remove metadata columns as they will not be useful in the model creation.
+
+```{r}
+filtered_df <- df %>%
+  select(-c(areaUnitID, meshblockId, tlaId)) %>%
+  filter(crashYear >= 2020)
+```
+
+From the filtered dataframe, we remove the columns that are either redundant, or irrelevant to the model. We also cleaned the dataset for the speedLimit, NumberOfLanes, streetLight predictors to remove null values relevant to the data dictionary. We then also aggregate the number of vehicle damage, object damage, and property damage as we want to predict those.
+
+```{r}
+lean_df <- filtered_df %>%
+  select(-c('advisorySpeed', 'slipOrFlood', 'temporarySpeedLimit', 'weatherB',
+            'crashDirectionDescription', 'directionRoleDescription',
+            'parkedVehicle', 'vehicle', 'crashFinancialYear', 'crashYear',
+            'crashLocation2', 'tlaName', 'crashRoadSideRoad', 'intersection', 'X', 'Y', 'OBJECTID')) %>%
+  mutate(crashSeverity = factor(crashSeverity),
+    speedLimit = case_when(
+           is.na(speedLimit) & urban == "urban" ~ 79,
+           is.na(speedLimit) & urban != 'urban' ~ 100,
+           TRUE ~ speedLimit
+           ),
+         NumberOfLanes = case_when(
+           is.na(NumberOfLanes) & roadLane == 'Off road' ~ 0,
+           is.na(NumberOfLanes) & str_detect(crashLocation1, 'OFF') ~ 0,
+           TRUE ~ NumberOfLanes
+         ),
+         streetLight = case_when(
+           is.na(streetLight) ~ 'Unknown',
+           TRUE ~ streetLight
+         ),
+         bridge = case_when(
+           is.na(bridge) ~ 0,
+           TRUE ~ bridge
+         ),
+         cliffBank = case_when(
+           is.na(cliffBank) ~ 0,
+           TRUE ~ cliffBank
+         ),
+         ditch = case_when(
+           is.na(ditch) ~ 0,
+           TRUE ~ ditch
+         ),
+         debris = case_when(
+           is.na(debris) ~ 0,
+           TRUE ~ debris
+         ),
+         guardRail = case_when(
+           is.na(guardRail) ~ 0,
+           TRUE ~ guardRail
+         ),
+         houseOrBuilding = case_when(
+           is.na(houseOrBuilding) ~ 0,
+           TRUE ~ houseOrBuilding
+         ),
+         kerb = case_when(
+           is.na(kerb) ~ 0,
+           TRUE ~ kerb
+         ),
+         trafficControl = case_when(
+           is.na(trafficControl) ~ 'Not Applicable',
+           TRUE ~ trafficControl
+         ),
+         fence = case_when(
+           is.na(fence) ~ 0,
+           TRUE ~ fence
+         ),
+         otherObject = case_when(
+           is.na(otherObject) ~ 0,
+           TRUE ~ otherObject
+         ),
+         overBank = case_when(
+           is.na(overBank) ~ 0,
+           TRUE ~ overBank
+         ),
+         pedestrian = case_when(
+           is.na(pedestrian) ~ 0,
+           TRUE ~ pedestrian
+         ),
+         phoneBoxEtc = case_when(
+           is.na(phoneBoxEtc) ~ 0,
+           TRUE ~ phoneBoxEtc
+         ),
+         strayAnimal = case_when(
+           is.na(strayAnimal) ~ 0,
+           TRUE ~ strayAnimal
+         ),
+         trafficSign = case_when(
+           is.na(trafficSign) ~ 0,
+           TRUE ~ trafficSign
+         ),
+         trafficIsland = case_when(
+           is.na(trafficIsland) ~ 0,
+           TRUE ~ trafficIsland
+         ),
+         objectThrownOrDropped = case_when(
+           is.na(objectThrownOrDropped) ~ 0,
+           TRUE ~ objectThrownOrDropped
+         ),
+         train = case_when(
+           is.na(train) ~ 0,
+           TRUE ~ train
+         ),
+         tree = case_when(
+           is.na(tree) ~ 0,
+           TRUE ~ tree
+         ),
+         waterRiver = case_when(
+           is.na(waterRiver) ~ 0,
+           TRUE ~ waterRiver
+         ),
+         postOrPole = case_when(
+           is.na(postOrPole) ~ 0,
+           TRUE ~ postOrPole
+         ),
+         roadworks = case_when(
+           is.na(roadworks) ~ 0,
+           TRUE ~ roadworks
+         ),
+         vehicle_damage = bicycle + bus+ carStationWagon + moped + motorcycle + otherVehicleType +
+           schoolBus + suv + taxi + train+ truck+ unknownVehicleType+ vanOrUtility,
+         object_damage = objectThrownOrDropped + otherObject,
+         property_damage = fence + houseOrBuilding + phoneBoxEtc + postOrPole + bridge+ guardRail + trafficSign
+         )
+```
+
+Checking the number of null values, because randomForest does not accept null values in the predictors.
+
+```{r}
+colSums(is.na(lean_df))
+```
+
+Group together variables so we can create different dataframes for each response variable we're predicting.
+
+```{r}
+vehicle_damage_variables <- c('bicycle', 'bus', 'carStationWagon', 'moped', 'motorcycle', 'otherVehicleType','schoolBus', 'suv', 'taxi', 'train', 'truck', 'unknownVehicleType', 'vanOrUtility')
+
+object_damage_variables <- c('objectThrownOrDropped', 'otherObject')
+
+crash_aftermath_variables <- c('pedestrian', 'strayAnimal')
+
+property_damage_variables <- c('fence', 'houseOrBuilding', 'phoneBoxEtc', 'postOrPole', 'bridge', 'guardRail', 'trafficSign')
+
+injury_count_variables <- c('fatalCount', 'minorInjuryCount', 'seriousInjuryCount')
+```
+
+# Model Creation: Casualty predictions
+
+First, let's check the correlation among the continuous variables to reduce the risk of fitting the model to redundant variables.
+
+```{r}
+continuous_vars <- lean_df[, c('bicycle', 'bus', 'carStationWagon', 'moped', 'motorcycle', 'otherVehicleType','schoolBus', 'suv', 'taxi', 'train', 'truck', 'unknownVehicleType', 'vanOrUtility','objectThrownOrDropped', 'otherObject','pedestrian', 'strayAnimal','fence', 'houseOrBuilding', 'phoneBoxEtc', 'postOrPole', 'bridge', 'guardRail', 'trafficSign','fatalCount', 'minorInjuryCount', 'seriousInjuryCount')]
+
+correlation_matrix <- cor(continuous_vars, use = "complete.obs")
+```
+
+We're using corrplot to graphically represent the correlations to check if there are collinear variables.
+
+```{r}
+library(corrplot)
+corrplot(correlation_matrix,
+         method = 'color',
+         type = 'upper',
+         tl.col = 'black',
+         tl.cex = 0.7,
+         col = colorRampPalette(c("red", "white", "blue"))(100),
+         number.cex = 0.5)
+```
+As we can see from the correlation matrix, there is no strongly correlated variables, which means less risk of multicollinearity, can be beneficial for our random forest models used for the following regression tasks.
+
+
+Then, randomly split the dataset into 80/20 train and test.
+
+```{r}
+row.number <- sample(1:nrow(lean_df), 0.8*nrow(lean_df))
+train <- lean_df[row.number,]
+test <- lean_df[-row.number,]
+```
+
+The succeeding regression type of random forest models follow a pattern of isolating the predictors to those relevant to the response, and then fitting them into their respective random forest model. We then create pdp plots to show how each predictor affects the result in isolation (i.e. without interactions with the other variables), which is oversimplifying the actual model, but is more interpretable to stakeholders.
+
+### Predicting the count of vehicle damages
+
+```{r warning=FALSE}
+vehicle_train <- train %>%
+    select(-vehicle_damage_variables, -object_damage_variables, -crash_aftermath_variables, -property_damage_variables, -injury_count_variables, -crashLocation1, -urban, -crashSeverity, -object_damage, -property_damage)
+```
+
+```{r}
+set.seed(1)
+
+rf.vehicle <- randomForest(vehicle_damage ~ ., data = vehicle_train, mtry = (length(vehicle_train)-1)/3, importance = TRUE)
+
+rf.vehicle
+varImpPlot(rf.vehicle)
+```
+
+
+
+#### Model Visualization: Vehicle Damage
+
+For interpretability, we can plot the Partial Dependency Plots of each important variable, which holds all other variables constant and tries out different value of the variable to see its effect on the response (probability of being a severe crash). This method oversimplifies the random forest model, as the interactions are lost in the PDP plots. This is why these plots in the context of a random forest is only to give stakeholders an idea of how each variable affects the prediction.
+
+We first create the PDP dataframes, which try out different values of each variable in isolation, and plot the probability given our model.
+
+```{r}
+pdp_ditch <- partial(rf.vehicle, pred.var = 'ditch', data = test, type = 'regression') %>% rename(x = ditch)
+pdp_roadwork <- partial(rf.vehicle, pred.var = 'roadworks', data = test, type = 'regression') %>% rename(x = roadworks)
+pdp_waterRiver <- partial(rf.vehicle, pred.var = 'waterRiver', data = test, type = 'regression') %>% rename(x = waterRiver)
+pdp_cliffBank <- partial(rf.vehicle, pred.var = 'cliffBank', data = test, type = 'regression') %>% rename(x = cliffBank)
+pdp_overBank <- partial(rf.vehicle, pred.var = 'overBank', data = test, type = 'regression') %>% rename(x = overBank)
+pdp_tree <- partial(rf.vehicle, pred.var = 'tree', data = test, type = 'regression') %>% rename(x = tree)
+pdp_trafficIsland <- partial(rf.vehicle, pred.var = 'trafficIsland', data = test, type = 'regression') %>% rename(x = trafficIsland)
+pdp_NumberOfLanes <- partial(rf.vehicle, pred.var = 'NumberOfLanes', data = test, type = 'regression') %>% rename(x = NumberOfLanes)
+pdp_speedLimit <- partial(rf.vehicle, pred.var = 'speedLimit', data = test, type = 'regression') %>% rename(x = speedLimit)
+```
+
+These are then combined into one dataframe for plotting.
+
+```{r}
+pdp_data <- bind_rows(
+  data.frame(Variable = "ditch", PDP = pdp_ditch),
+  data.frame(Variable = "roadworks", PDP = pdp_roadwork),
+  data.frame(Variable = "waterRiver", PDP = pdp_waterRiver),
+  data.frame(Variable = "cliffBank", PDP = pdp_cliffBank),
+  data.frame(Variable = "overBank", PDP = pdp_overBank),
+  data.frame(Variable = "tree", PDP = pdp_tree),
+  data.frame(Variable = "trafficIsland", PDP = pdp_trafficIsland),
+  data.frame(Variable = "NumberOfLanes", PDP = pdp_NumberOfLanes),
+  data.frame(Variable = "speedLimit", PDP = pdp_speedLimit)
+)
+```
+
+We then plot the combined dataframe, split by the variable to see their respective effects on the probability of serious crashes.
+
+```{r}
+pdp_plot <- ggplot(pdp_data, aes(x = PDP.x, y = PDP.yhat)) +
+  geom_line() +
+  facet_wrap(vars(Variable), scales = 'free') +
+  labs(
+    title = "Partial Dependence of Important Variables",
+    x = "Input Values",
+    y = "Probability of being Serious"
+  ) +
+  theme_minimal()
+
+pdp_plot
+```
+
+### Predicting the count of involved pedestrians
+
+```{r warning=FALSE}
+pedestrian_train <- train %>%
+    select(-vehicle_damage_variables, -object_damage_variables, -strayAnimal, -property_damage_variables, -injury_count_variables, -crashLocation1, -urban, -crashSeverity, -object_damage, -property_damage, -vehicle_damage)
+```
+
+```{r}
+set.seed(1)
+
+rf.pedestrian <- randomForest(pedestrian ~ ., data = pedestrian_train, mtry = (length(pedestrian_train)-1)/3, importance = TRUE)
+
+rf.pedestrian
+varImpPlot(rf.pedestrian)
+```
+
+#### Model Visualization: Pedestrian Casualties
+
+```{r}
+pdp_ditch <- partial(rf.pedestrian, pred.var = 'ditch', data = test, type = 'regression') %>% rename(x = ditch)
+pdp_roadwork <- partial(rf.pedestrian, pred.var = 'roadworks', data = test, type = 'regression') %>% rename(x = roadworks)
+pdp_waterRiver <- partial(rf.pedestrian, pred.var = 'waterRiver', data = test, type = 'regression') %>% rename(x = waterRiver)
+pdp_cliffBank <- partial(rf.pedestrian, pred.var = 'cliffBank', data = test, type = 'regression') %>% rename(x = cliffBank)
+pdp_overBank <- partial(rf.pedestrian, pred.var = 'overBank', data = test, type = 'regression') %>% rename(x = overBank)
+pdp_tree <- partial(rf.pedestrian, pred.var = 'tree', data = test, type = 'regression') %>% rename(x = tree)
+pdp_trafficIsland <- partial(rf.pedestrian, pred.var = 'trafficIsland', data = test, type = 'regression') %>% rename(x = trafficIsland)
+pdp_NumberOfLanes <- partial(rf.pedestrian, pred.var = 'NumberOfLanes', data = test, type = 'regression') %>% rename(x = NumberOfLanes)
+pdp_speedLimit <- partial(rf.pedestrian, pred.var = 'speedLimit', data = test, type = 'regression') %>% rename(x = speedLimit)
+```
+
+```{r}
+pdp_data <- bind_rows(
+  data.frame(Variable = "ditch", PDP = pdp_ditch),
+  data.frame(Variable = "roadworks", PDP = pdp_roadwork),
+  data.frame(Variable = "waterRiver", PDP = pdp_waterRiver),
+  data.frame(Variable = "cliffBank", PDP = pdp_cliffBank),
+  data.frame(Variable = "overBank", PDP = pdp_overBank),
+  data.frame(Variable = "tree", PDP = pdp_tree),
+  data.frame(Variable = "trafficIsland", PDP = pdp_trafficIsland),
+  data.frame(Variable = "NumberOfLanes", PDP = pdp_NumberOfLanes),
+  data.frame(Variable = "speedLimit", PDP = pdp_speedLimit)
+)
+```
+
+```{r}
+pdp_plot <- ggplot(pdp_data, aes(x = PDP.x, y = PDP.yhat)) +
+  geom_line() +
+  facet_wrap(vars(Variable), scales = 'free') +
+  labs(
+    title = "Partial Dependence of Important Variables",
+    x = "Input Values",
+    y = "Probability of being Serious"
+  ) +
+  theme_minimal()
+
+pdp_plot
+```
+
+
+### Predicting the count of involved stray animals
+
+```{r warning=FALSE}
+strayAnimal_train <- train %>%
+    select(-vehicle_damage_variables, -object_damage_variables, -pedestrian, -property_damage_variables, -injury_count_variables, -crashLocation1, -urban, -crashSeverity, -object_damage, -property_damage, -vehicle_damage)
+```
+
+```{r}
+set.seed(1)
+
+rf.strayAnimal <- randomForest(strayAnimal ~ ., data = strayAnimal_train, mtry = (length(strayAnimal_train)-1)/3, importance = TRUE)
+
+rf.strayAnimal
+varImpPlot(rf.strayAnimal)
+```
+
+#### Model Visualization: Stray Animals
+
+```{r}
+pdp_ditch <- partial(rf.strayAnimal, pred.var = 'ditch', data = test, type = 'regression') %>% rename(x = ditch)
+pdp_roadwork <- partial(rf.strayAnimal, pred.var = 'roadworks', data = test, type = 'regression') %>% rename(x = roadworks)
+pdp_waterRiver <- partial(rf.strayAnimal, pred.var = 'waterRiver', data = test, type = 'regression') %>% rename(x = waterRiver)
+pdp_cliffBank <- partial(rf.strayAnimal, pred.var = 'cliffBank', data = test, type = 'regression') %>% rename(x = cliffBank)
+pdp_overBank <- partial(rf.strayAnimal, pred.var = 'overBank', data = test, type = 'regression') %>% rename(x = overBank)
+pdp_tree <- partial(rf.strayAnimal, pred.var = 'tree', data = test, type = 'regression') %>% rename(x = tree)
+pdp_trafficIsland <- partial(rf.strayAnimal, pred.var = 'trafficIsland', data = test, type = 'regression') %>% rename(x = trafficIsland)
+pdp_NumberOfLanes <- partial(rf.strayAnimal, pred.var = 'NumberOfLanes', data = test, type = 'regression') %>% rename(x = NumberOfLanes)
+pdp_speedLimit <- partial(rf.strayAnimal, pred.var = 'speedLimit', data = test, type = 'regression') %>% rename(x = speedLimit)
+```
+
+```{r}
+pdp_data <- bind_rows(
+  data.frame(Variable = "ditch", PDP = pdp_ditch),
+  data.frame(Variable = "roadworks", PDP = pdp_roadwork),
+  data.frame(Variable = "waterRiver", PDP = pdp_waterRiver),
+  data.frame(Variable = "cliffBank", PDP = pdp_cliffBank),
+  data.frame(Variable = "overBank", PDP = pdp_overBank),
+  data.frame(Variable = "tree", PDP = pdp_tree),
+  data.frame(Variable = "trafficIsland", PDP = pdp_trafficIsland),
+  data.frame(Variable = "NumberOfLanes", PDP = pdp_NumberOfLanes),
+  data.frame(Variable = "speedLimit", PDP = pdp_speedLimit)
+)
+```
+
+```{r}
+pdp_plot <- ggplot(pdp_data, aes(x = PDP.x, y = PDP.yhat)) +
+  geom_line() +
+  facet_wrap(vars(Variable), scales = 'free') +
+  labs(
+    title = "Partial Dependence of Important Variables",
+    x = "Input Values",
+    y = "Probability of being Serious"
+  ) +
+  theme_minimal()
+
+pdp_plot
+```
+
+### Predicting the count of property damage (public and private property)
+
+```{r warning=FALSE}
+property_train <- train %>%
+    select(-vehicle_damage_variables, -object_damage_variables, -crash_aftermath_variables, -property_damage_variables, -injury_count_variables, -crashLocation1, -urban, -vehicle_damage, -object_damage, -crashSeverity)
+```
+
+```{r warning=FALSE}
+set.seed(1)
+
+rf.property <- randomForest(property_damage ~ ., data = property_train, mtry = (length(property_train)-1)/3, importance = TRUE)
+
+rf.property
+varImpPlot(rf.property)
+```
+
+#### Model Visualization: Stray Animals
+
+```{r}
+pdp_ditch <- partial(rf.property, pred.var = 'ditch', data = test, type = 'regression') %>% rename(x = ditch)
+pdp_roadwork <- partial(rf.property, pred.var = 'roadworks', data = test, type = 'regression') %>% rename(x = roadworks)
+pdp_waterRiver <- partial(rf.property, pred.var = 'waterRiver', data = test, type = 'regression') %>% rename(x = waterRiver)
+pdp_cliffBank <- partial(rf.property, pred.var = 'cliffBank', data = test, type = 'regression') %>% rename(x = cliffBank)
+pdp_overBank <- partial(rf.property, pred.var = 'overBank', data = test, type = 'regression') %>% rename(x = overBank)
+pdp_tree <- partial(rf.property, pred.var = 'tree', data = test, type = 'regression') %>% rename(x = tree)
+pdp_trafficIsland <- partial(rf.property, pred.var = 'trafficIsland', data = test, type = 'regression') %>% rename(x = trafficIsland)
+pdp_NumberOfLanes <- partial(rf.property, pred.var = 'NumberOfLanes', data = test, type = 'regression') %>% rename(x = NumberOfLanes)
+pdp_speedLimit <- partial(rf.property, pred.var = 'speedLimit', data = test, type = 'regression') %>% rename(x = speedLimit)
+```
+
+```{r}
+pdp_data <- bind_rows(
+  data.frame(Variable = "ditch", PDP = pdp_ditch),
+  data.frame(Variable = "roadworks", PDP = pdp_roadwork),
+  data.frame(Variable = "waterRiver", PDP = pdp_waterRiver),
+  data.frame(Variable = "cliffBank", PDP = pdp_cliffBank),
+  data.frame(Variable = "overBank", PDP = pdp_overBank),
+  data.frame(Variable = "tree", PDP = pdp_tree),
+  data.frame(Variable = "trafficIsland", PDP = pdp_trafficIsland),
+  data.frame(Variable = "NumberOfLanes", PDP = pdp_NumberOfLanes),
+  data.frame(Variable = "speedLimit", PDP = pdp_speedLimit)
+)
+```
+
+```{r}
+pdp_plot <- ggplot(pdp_data, aes(x = PDP.x, y = PDP.yhat)) +
+  geom_line() +
+  facet_wrap(vars(Variable), scales = 'free') +
+  labs(
+    title = "Partial Dependence of Important Variables",
+    x = "Input Values",
+    y = "Probability of being Serious"
+  ) +
+  theme_minimal()
+
+pdp_plot
+```
+
+### Predicting the count of serious injuries
+
+```{r warning=FALSE}
+seriousInjury_train <- train %>%
+    select(-vehicle_damage_variables, -object_damage_variables, -crash_aftermath_variables, -property_damage_variables, -injury_count_variables, -crashLocation1, -urban, -vehicle_damage, -object_damage, -crashSeverity, -property_damage, seriousInjuryCount)
+```
+
+```{r}
+set.seed(1)
+
+rf.seriousInjury <- randomForest(seriousInjuryCount ~ ., data = seriousInjury_train, mtry = (length(seriousInjury_train)-1)/3, importance = TRUE)
+
+rf.seriousInjury
+varImpPlot(rf.seriousInjury)
+```
+
+#### Model Visualization: Count of Serious Injuries
+
+```{r}
+pdp_ditch <- partial(rf.seriousInjury, pred.var = 'ditch', data = test, type = 'regression') %>% rename(x = ditch)
+pdp_roadwork <- partial(rf.seriousInjury, pred.var = 'roadworks', data = test, type = 'regression') %>% rename(x = roadworks)
+pdp_waterRiver <- partial(rf.seriousInjury, pred.var = 'waterRiver', data = test, type = 'regression') %>% rename(x = waterRiver)
+pdp_cliffBank <- partial(rf.seriousInjury, pred.var = 'cliffBank', data = test, type = 'regression') %>% rename(x = cliffBank)
+pdp_overBank <- partial(rf.seriousInjury, pred.var = 'overBank', data = test, type = 'regression') %>% rename(x = overBank)
+pdp_tree <- partial(rf.seriousInjury, pred.var = 'tree', data = test, type = 'regression') %>% rename(x = tree)
+pdp_trafficIsland <- partial(rf.seriousInjury, pred.var = 'trafficIsland', data = test, type = 'regression') %>% rename(x = trafficIsland)
+pdp_NumberOfLanes <- partial(rf.seriousInjury, pred.var = 'NumberOfLanes', data = test, type = 'regression') %>% rename(x = NumberOfLanes)
+pdp_speedLimit <- partial(rf.seriousInjury, pred.var = 'speedLimit', data = test, type = 'regression') %>% rename(x = speedLimit)
+```
+
+```{r}
+pdp_data <- bind_rows(
+  data.frame(Variable = "ditch", PDP = pdp_ditch),
+  data.frame(Variable = "roadworks", PDP = pdp_roadwork),
+  data.frame(Variable = "waterRiver", PDP = pdp_waterRiver),
+  data.frame(Variable = "cliffBank", PDP = pdp_cliffBank),
+  data.frame(Variable = "overBank", PDP = pdp_overBank),
+  data.frame(Variable = "tree", PDP = pdp_tree),
+  data.frame(Variable = "trafficIsland", PDP = pdp_trafficIsland),
+  data.frame(Variable = "NumberOfLanes", PDP = pdp_NumberOfLanes),
+  data.frame(Variable = "speedLimit", PDP = pdp_speedLimit)
+)
+```
+
+```{r}
+pdp_plot <- ggplot(pdp_data, aes(x = PDP.x, y = PDP.yhat)) +
+  geom_line() +
+  facet_wrap(vars(Variable), scales = 'free') +
+  labs(
+    title = "Partial Dependence of Important Variables",
+    x = "Input Values",
+    y = "Probability of being Serious"
+  ) +
+  theme_minimal()
+
+pdp_plot
+```
+
+### Predicting the count of minor injuries
+
+```{r warning=FALSE}
+minorInjury_train <- train %>%
+    select(-vehicle_damage_variables, -object_damage_variables, -crash_aftermath_variables, -property_damage_variables, -injury_count_variables, -crashLocation1, -urban, -vehicle_damage, -object_damage, -crashSeverity, -property_damage, minorInjuryCount)
+```
+
+```{r}
+set.seed(1)
+
+rf.minorInjury <- randomForest(minorInjuryCount ~ ., data = minorInjury_train, mtry = (length(minorInjury_train)-1)/3, importance = TRUE)
+
+rf.minorInjury
+varImpPlot(rf.minorInjury)
+```
+
+#### Model Visualization: Count of Minor Injuries
+
+```{r}
+pdp_ditch <- partial(rf.minorInjury, pred.var = 'ditch', data = test, type = 'regression') %>% rename(x = ditch)
+pdp_roadwork <- partial(rf.minorInjury, pred.var = 'roadworks', data = test, type = 'regression') %>% rename(x = roadworks)
+pdp_waterRiver <- partial(rf.minorInjury, pred.var = 'waterRiver', data = test, type = 'regression') %>% rename(x = waterRiver)
+pdp_cliffBank <- partial(rf.minorInjury, pred.var = 'cliffBank', data = test, type = 'regression') %>% rename(x = cliffBank)
+pdp_overBank <- partial(rf.minorInjury, pred.var = 'overBank', data = test, type = 'regression') %>% rename(x = overBank)
+pdp_tree <- partial(rf.minorInjury, pred.var = 'tree', data = test, type = 'regression') %>% rename(x = tree)
+pdp_trafficIsland <- partial(rf.minorInjury, pred.var = 'trafficIsland', data = test, type = 'regression') %>% rename(x = trafficIsland)
+pdp_NumberOfLanes <- partial(rf.minorInjury, pred.var = 'NumberOfLanes', data = test, type = 'regression') %>% rename(x = NumberOfLanes)
+pdp_speedLimit <- partial(rf.minorInjury, pred.var = 'speedLimit', data = test, type = 'regression') %>% rename(x = speedLimit)
+```
+
+```{r}
+pdp_data <- bind_rows(
+  data.frame(Variable = "ditch", PDP = pdp_ditch),
+  data.frame(Variable = "roadworks", PDP = pdp_roadwork),
+  data.frame(Variable = "waterRiver", PDP = pdp_waterRiver),
+  data.frame(Variable = "cliffBank", PDP = pdp_cliffBank),
+  data.frame(Variable = "overBank", PDP = pdp_overBank),
+  data.frame(Variable = "tree", PDP = pdp_tree),
+  data.frame(Variable = "trafficIsland", PDP = pdp_trafficIsland),
+  data.frame(Variable = "NumberOfLanes", PDP = pdp_NumberOfLanes),
+  data.frame(Variable = "speedLimit", PDP = pdp_speedLimit)
+)
+```
+
+```{r}
+pdp_plot <- ggplot(pdp_data, aes(x = PDP.x, y = PDP.yhat)) +
+  geom_line() +
+  facet_wrap(vars(Variable), scales = 'free') +
+  labs(
+    title = "Partial Dependence of Important Variables",
+    x = "Input Values",
+    y = "Probability of being Serious"
+  ) +
+  theme_minimal()
+
+pdp_plot
+```
+
+### Predicting the count of object damage involved in crashes
+
+```{r}
+object_damage_train <- train %>%
+    select(-vehicle_damage_variables, -object_damage_variables, -crash_aftermath_variables, -property_damage_variables, -injury_count_variables, -crashLocation1, -urban, -vehicle_damage, object_damage, -crashSeverity,-property_damage, -minorInjuryCount)
+```
+
+```{r}
+set.seed(1)
+
+rf.object <- randomForest(object_damage ~ ., data = object_damage_train, mtry = (length(object_damage_train)-1)/3, importance = TRUE)
+
+rf.object
+varImpPlot(rf.object)
+```
+
+#### Model Visualization: Count of Object Damage
+
+```{r}
+pdp_ditch <- partial(rf.object, pred.var = 'ditch', data = test, type = 'regression') %>% rename(x = ditch)
+pdp_roadwork <- partial(rf.object, pred.var = 'roadworks', data = test, type = 'regression') %>% rename(x = roadworks)
+pdp_waterRiver <- partial(rf.object, pred.var = 'waterRiver', data = test, type = 'regression') %>% rename(x = waterRiver)
+pdp_cliffBank <- partial(rf.object, pred.var = 'cliffBank', data = test, type = 'regression') %>% rename(x = cliffBank)
+pdp_overBank <- partial(rf.object, pred.var = 'overBank', data = test, type = 'regression') %>% rename(x = overBank)
+pdp_tree <- partial(rf.object, pred.var = 'tree', data = test, type = 'regression') %>% rename(x = tree)
+pdp_trafficIsland <- partial(rf.object, pred.var = 'trafficIsland', data = test, type = 'regression') %>% rename(x = trafficIsland)
+pdp_NumberOfLanes <- partial(rf.object, pred.var = 'NumberOfLanes', data = test, type = 'regression') %>% rename(x = NumberOfLanes)
+pdp_speedLimit <- partial(rf.object, pred.var = 'speedLimit', data = test, type = 'regression') %>% rename(x = speedLimit)
+```
+
+```{r}
+pdp_data <- bind_rows(
+  data.frame(Variable = "ditch", PDP = pdp_ditch),
+  data.frame(Variable = "roadworks", PDP = pdp_roadwork),
+  data.frame(Variable = "waterRiver", PDP = pdp_waterRiver),
+  data.frame(Variable = "cliffBank", PDP = pdp_cliffBank),
+  data.frame(Variable = "overBank", PDP = pdp_overBank),
+  data.frame(Variable = "tree", PDP = pdp_tree),
+  data.frame(Variable = "trafficIsland", PDP = pdp_trafficIsland),
+  data.frame(Variable = "NumberOfLanes", PDP = pdp_NumberOfLanes),
+  data.frame(Variable = "speedLimit", PDP = pdp_speedLimit)
+)
+```
+
+```{r}
+pdp_plot <- ggplot(pdp_data, aes(x = PDP.x, y = PDP.yhat)) +
+  geom_line() +
+  facet_wrap(vars(Variable), scales = 'free') +
+  labs(
+    title = "Partial Dependence of Important Variables",
+    x = "Input Values",
+    y = "Probability of being Serious"
+  ) +
+  theme_minimal()
+
+pdp_plot
+```
+
+### Predicting the count of fatal injuries
+
+```{r}
+fatalCount_train <- train %>%
+    select(-vehicle_damage_variables, -object_damage_variables, -crash_aftermath_variables, -property_damage_variables, -seriousInjuryCount, -crashLocation1, -urban, -vehicle_damage, -object_damage, -crashSeverity,  -property_damage, -minorInjuryCount)
+```
+
+```{r}
+set.seed(1)
+
+rf.fatalCount <- randomForest(fatalCount ~ ., data = fatalCount_train, mtry = (length(fatalCount_train)-1)/3, importance = TRUE)
+
+rf.fatalCount
+varImpPlot(rf.fatalCount)
+```
+
+#### Model Visualization: Count of Fatal Injuries
+
+```{r}
+pdp_ditch <- partial(rf.fatalCount, pred.var = 'ditch', data = test, type = 'regression') %>% rename(x = ditch)
+pdp_roadwork <- partial(rf.fatalCount, pred.var = 'roadworks', data = test, type = 'regression') %>% rename(x = roadworks)
+pdp_waterRiver <- partial(rf.fatalCount, pred.var = 'waterRiver', data = test, type = 'regression') %>% rename(x = waterRiver)
+pdp_cliffBank <- partial(rf.fatalCount, pred.var = 'cliffBank', data = test, type = 'regression') %>% rename(x = cliffBank)
+pdp_overBank <- partial(rf.fatalCount, pred.var = 'overBank', data = test, type = 'regression') %>% rename(x = overBank)
+pdp_tree <- partial(rf.fatalCount, pred.var = 'tree', data = test, type = 'regression') %>% rename(x = tree)
+pdp_trafficIsland <- partial(rf.fatalCount, pred.var = 'trafficIsland', data = test, type = 'regression') %>% rename(x = trafficIsland)
+pdp_NumberOfLanes <- partial(rf.fatalCount, pred.var = 'NumberOfLanes', data = test, type = 'regression') %>% rename(x = NumberOfLanes)
+pdp_speedLimit <- partial(rf.fatalCount, pred.var = 'speedLimit', data = test, type = 'regression') %>% rename(x = speedLimit)
+```
+
+```{r}
+pdp_data <- bind_rows(
+  data.frame(Variable = "ditch", PDP = pdp_ditch),
+  data.frame(Variable = "roadworks", PDP = pdp_roadwork),
+  data.frame(Variable = "waterRiver", PDP = pdp_waterRiver),
+  data.frame(Variable = "cliffBank", PDP = pdp_cliffBank),
+  data.frame(Variable = "overBank", PDP = pdp_overBank),
+  data.frame(Variable = "tree", PDP = pdp_tree),
+  data.frame(Variable = "trafficIsland", PDP = pdp_trafficIsland),
+  data.frame(Variable = "NumberOfLanes", PDP = pdp_NumberOfLanes),
+  data.frame(Variable = "speedLimit", PDP = pdp_speedLimit)
+)
+```
+
+```{r}
+pdp_plot <- ggplot(pdp_data, aes(x = PDP.x, y = PDP.yhat)) +
+  geom_line() +
+  facet_wrap(vars(Variable), scales = 'free') +
+  labs(
+    title = "Partial Dependence of Important Variables",
+    x = "Input Values",
+    y = "Probability of being Serious"
+  ) +
+  theme_minimal()
+
+pdp_plot
+```
