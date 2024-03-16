@@ -17,14 +17,54 @@ This project analyzes crime data in New Zealand to identify trends and relations
 
 #### Tech Stack
 
-- Python (Pandas)
+Python
+- Pandas
 - Matplotlib
 - Tkinter
 
 
 ### Project 2: GHCN Data Analysis using Spark
+#### Description
+
+This project explores the analysis of climate data using Apache Spark, a distributed computing framework. The dataset comprises daily climate summaries and metadata spanning a remarkable 262 years, accumulating to a substantial 103.5 GB of storage.
+
+#### Key Features:
+
+- Large-Scale Data Processing: The project tackles a massive dataset, efficiently handling data loading, cleaning, transformations, and analysis using Spark's distributed processing capabilities.
+- In-Depth Data Exploration: It delves into various aspects of the climate data, including station analysis (total stations, active stations, network participation), distance calculations between stations, and comprehensive exploration of daily observations.
+- Data Management Strategies: The project demonstrates effective strategies for managing large datasets in Spark, including broadcast joins to minimize data shuffling, data reuse for efficient analysis, and caching for faster processing.
+- Climate Analysis: It performs in-depth climate analysis, such as calculating average annual rainfall by country and year, identifying potential outliers, and visualizing average rainfall distribution using choropleth maps.
+
+#### Technical Stack:
+
+Python Apache Spark
 
 ### Project 3: Million Song Dataset using Spark
+#### Description
+
+This project analyzes music data using Apache Spark to build a system for music recommendations. It identifies songs with similar audio properties and leverages genre information to personalize suggestions.
+
+#### Key Features:
+
+Audio Similarity Analysis:
+- Analyzes audio features extracted from music files.
+- Identifies songs with similar acoustic characteristics based on selected features.
+
+Machine Learning for Genre Classification:
+- Uses supervised learning models to predict genre labels for songs.
+- Improves recommendation accuracy by incorporating genre preferences.
+
+Data Preprocessing and Feature Engineering:
+- Cleans and prepares audio data for analysis.
+- Selects and transforms relevant features for model training.
+
+Handling Class Imbalance:
+- Addresses the challenge of uneven genre distribution in music data.
+- Employs sampling techniques to ensure balanced representation of all genres.
+
+#### Tech Stack:
+
+Python Apache Spark
 
 ### Project 4: Fashion-MNIST Classification with Neural Networks
 #### Description
