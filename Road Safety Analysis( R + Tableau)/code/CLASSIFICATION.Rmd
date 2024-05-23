@@ -1,7 +1,3 @@
----
-title: "INFO634 - Group Assignment - Group 1"
----
-
 # Preparation.
 Load the Dataset and relevant libraries. Tidyverse is used for easy transition and transformation of data. randomForest is used to create the models. Caret is used for creating the confusion matrix on the test set. The library pdp creates Partial Dependency data and Ggplot2 allows us to plot them.
 ```{r setup}
