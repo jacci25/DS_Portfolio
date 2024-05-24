@@ -26,7 +26,7 @@ Python: Apache Spark, Pandas, Seaborn
 
 Used Google Colab and Python to explore neural network architectures for classifying fashion items in the Fashion-MNIST dataset, experimenting with hyperparameter tuning and convolutional neural networks(CNNs).
 
-**Technical Stack**
+**Tech Stack**
 
 Python: NumPy, Pandas, Matplotlib, Seaborn, Scikit-learn, TensorFlow, Keras, Optuna
 
@@ -36,7 +36,7 @@ Used R and Julia to wrangle and clean the data and then to analyse the impact of
 
 Created the relational data model among various data sets(NZ school directory, crime data, housing price data, population estimates, territorial authority polygonsby) using the territorial authority as the primary key.
 
-**Technical Stack**
+**Tech Stack**
 
 - Julia - http package
 - R - tidyverse packages, sf library
