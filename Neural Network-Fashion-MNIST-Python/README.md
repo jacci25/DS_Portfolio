@@ -79,6 +79,11 @@ After increasing the complexity, the evaluation metrics show that this model has
 ## Building a Convolutional Neural Network (CNN) Architecture
 CNNs are well-suited for tasks where there are spatial hierarchies of features. For instance, in images, features at higher levels often represent more complex patterns that are built upon simpler patterns at lower levels.
 
+<img width="232" alt="image" src="https://github.com/jacci25/Data-Science-Portfolio/assets/137580685/090f72eb-172d-40b4-96ff-14d7b43d8310">
+
+
+<img width="724" alt="Screenshot 2024-05-24 at 12 34 03" src="https://github.com/jacci25/Data-Science-Portfolio/assets/137580685/7e3ec635-c520-4e51-bddc-fdc5d75507b5">
+
 In the model, we have a combination of convolutional layers, max-pooling layers, and dense layers. This architecture allows the model to learn hierarchical features from the input images. Although the model achieves high accuracy on both training and validation sets. There seems to experience overfitting, as the number of epochs increases, the disparity between these two loss curves becomes more pronounced, and  the validation loss always surpasses the training loss. This indicates that while the model performs well on the training data, its performance on unseen data is declining, which is a possible sign of overfitting.
 
 In order to maintain the high accuracy and low loss in the model, we will use the dropout technique to reduce overfitting. 
@@ -86,11 +91,17 @@ In order to maintain the high accuracy and low loss in the model, we will use th
 ## Building a Convolutional Neural Network (CNN) Architecture with Dropout Technique
 In this architecture, we have added the dropout regularization technique to address the overfitting issue and improve the generalization ability of the model.
 
+<img width="237" alt="image" src="https://github.com/jacci25/Data-Science-Portfolio/assets/137580685/59d9cb23-0308-45f8-bef2-90f04e578f82">
+
+
+<img width="750" alt="Screenshot 2024-05-24 at 12 34 53" src="https://github.com/jacci25/Data-Science-Portfolio/assets/137580685/0df1b82a-b9fa-4ae4-be55-5835c398c9c4">
 
 The model performs very well, achieving high accuracy on both training and test sets. The model is performing well on the validation and test sets, indicating that the addition of dropout layers has helped reduce overfitting compared to the previous model.
 
 In conclusion, the final CNN architecture with dropout appears to be a robust and well-performing model for the Fashion-MNIST dataset. Further fine-tuning or experimentation with additional techniques may lead to even better results.
 
+# Appendix
+<img width="794" alt="Screenshot 2024-05-24 at 12 35 30" src="https://github.com/jacci25/Data-Science-Portfolio/assets/137580685/390c8984-14d1-46f2-aa93-c262b4eb48e3">
 
 
 
