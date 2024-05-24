@@ -171,5 +171,21 @@ This comprehensive strategy encompasses initiatives such as launching public awa
 
 The ultimate aim is to establish a collaborative effort that effectively reduces accidents during this critical time period.
 
+## Reference
+Drivers Licence Holder. NZ Transport Agency Open Data. (n.d.).
+https://opendata-nzta.opendata.arcgis.com/documents/driver-licence-holders/about
 
+2018 Census place summaries. Stat NZ.(n.d.). https://www.stats.govt.nz/tools/2018-census-place-summaries/ . Retrieved 7 October, 2023
+
+Road-to-Zero-strategy_final. NZ Transport Agency. December 2019.(n.d.). https://www.transport.govt.nz/assets/Uploads/Report/Road-to-Zero-strategy_final.pdf
+
+Speed Limit. NZ Transport Agency Road Code.(n.d.). https://www.nzta.govt.nz/roadcode/heavy-vehicle-road-code/road-code/about-limits/speed- limits/
+
+Demand and Activity. . NZ police. (n.d.). https://www.police.govt.nz/about-us/statistics-and- publications/data-and-statistics/demand-and-activity
+
+Cas Data field descriptions. Waka Kotahi open data. (n.d.). https://opendata- nzta.opendata.arcgis.com/pages/cas-data-field-descriptions
+
+Guide to treatment of crash locations - definitions - Waka Kotahi NZ (n.d.). https://www.nzta.govt.nz/assets/resources/guide-to-treatment-of-crash- location/docs/definitions.pdf
+
+Varghese, D. (2018). Comparative Study on Classic Machine learning Algorithms. Towards Data Science. https://towardsdatascience.com/comparative-study-on-classic-machine-learning algorithms- 24f9ff6ab222
 
