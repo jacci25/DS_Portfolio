@@ -79,7 +79,7 @@ After increasing the complexity, the evaluation metrics show that this model has
 ## Building a Convolutional Neural Network (CNN) Architecture
 CNNs are well-suited for tasks where there are spatial hierarchies of features. For instance, in images, features at higher levels often represent more complex patterns that are built upon simpler patterns at lower levels.
 
-<img width="232" alt="image" src="https://github.com/jacci25/Data-Science-Portfolio/assets/137580685/090f72eb-172d-40b4-96ff-14d7b43d8310">
+<img width="418" alt="Screenshot 2024-05-24 at 12 38 18" src="https://github.com/jacci25/Data-Science-Portfolio/assets/137580685/d50fc4c1-b7a3-4cfa-a795-e8c83108c4eb">
 
 In the model, we have a combination of convolutional layers, max-pooling layers, and dense layers. This architecture allows the model to learn hierarchical features from the input images. Although the model achieves high accuracy on both training and validation sets. There seems to experience overfitting, as the number of epochs increases, the disparity between these two loss curves becomes more pronounced, and  the validation loss always surpasses the training loss. This indicates that while the model performs well on the training data, its performance on unseen data is declining, which is a possible sign of overfitting.
 
@@ -90,7 +90,7 @@ In order to maintain the high accuracy and low loss in the model, we will use th
 ## Building a Convolutional Neural Network (CNN) Architecture with Dropout Technique
 In this architecture, we have added the dropout regularization technique to address the overfitting issue and improve the generalization ability of the model.
 
-<img width="237" alt="image" src="https://github.com/jacci25/Data-Science-Portfolio/assets/137580685/59d9cb23-0308-45f8-bef2-90f04e578f82">
+<img width="400" alt="Screenshot 2024-05-24 at 12 38 43" src="https://github.com/jacci25/Data-Science-Portfolio/assets/137580685/a01b70fd-c88b-42f6-8ea2-4525ff53f469">
 
 The model performs very well, achieving high accuracy on both training and test sets. The model is performing well on the validation and test sets, indicating that the addition of dropout layers has helped reduce overfitting compared to the previous model.
 
