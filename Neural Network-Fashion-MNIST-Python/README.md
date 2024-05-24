@@ -79,8 +79,17 @@ After increasing the complexity, the evaluation metrics show that this model has
 ## Building a Convolutional Neural Network (CNN) Architecture
 CNNs are well-suited for tasks where there are spatial hierarchies of features. For instance, in images, features at higher levels often represent more complex patterns that are built upon simpler patterns at lower levels.
 
+In the model, we have a combination of convolutional layers, max-pooling layers, and dense layers. This architecture allows the model to learn hierarchical features from the input images. Although the model achieves high accuracy on both training and validation sets. There seems to experience overfitting, as the number of epochs increases, the disparity between these two loss curves becomes more pronounced, and  the validation loss always surpasses the training loss. This indicates that while the model performs well on the training data, its performance on unseen data is declining, which is a possible sign of overfitting.
+
+In order to maintain the high accuracy and low loss in the model, we will use the dropout technique to reduce overfitting. 
+
+## Building a Convolutional Neural Network (CNN) Architecture with Dropout Technique
+In this architecture, we have added the dropout regularization technique to address the overfitting issue and improve the generalization ability of the model.
 
 
+The model performs very well, achieving high accuracy on both training and test sets. The model is performing well on the validation and test sets, indicating that the addition of dropout layers has helped reduce overfitting compared to the previous model.
+
+In conclusion, the final CNN architecture with dropout appears to be a robust and well-performing model for the Fashion-MNIST dataset. Further fine-tuning or experimentation with additional techniques may lead to even better results.
 
 
 
