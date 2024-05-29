@@ -17,7 +17,7 @@ This research aims to serve as a foundation for the development of effective str
 - Crashes by time of day
 2. Machine Learning(Random Forest) in R
 
-Tree-based methods, which is regarded as generally more robust than linear regression models, especially when handling categorical data (Varghese,2018), non-linear relationships, and variable interactions. Therefore,random forest ia used to deduce complex connections between multiple contributing elements and the level of severity.
+Tree-based methods, which is regarded as generally more robust than linear regression models, especially when handling categorical data (Varghese,2018), non-linear relationships, and variable interactions. Therefore,random forest is used to deduce complex connections between multiple contributing elements and the level of severity.
 - Predictors of severity
 - Predictors of the number of casualties and damage
 ## Data Cleaning, Wrangling, and Pre-Processing
